@@ -38,18 +38,30 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      # 5. 执行编译
+      # 5. 执行测试
+      - name: Run tests
+        run: ./gradlew test
+
+      # 6. 执行编译
       - name: Build with Gradle
         run: ./gradlew build
 
-      # 6. 上传 Artifact (日常构建也能下载打包好的 jar 测试)
+      # 7. 上传 Artifact (日常构建也能下载打包好的 jar 测试)
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: mod-artifacts
           path: build/libs/*.jar # 收集 build/libs 目录下的所有 jar 包
 
-      # 7. 自动创建 GitHub Release (仅在打 tag 时执行)
+      # 8. 上传测试报告 (测试失败时可查看详细报告)
+      - name: Upload Test Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-report
+          path: build/reports/tests/
+
+      # 9. 自动创建 GitHub Release (仅在打 tag 时执行)
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/v') 
