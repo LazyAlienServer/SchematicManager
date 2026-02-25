@@ -84,7 +84,7 @@ public class SchemCheckCommand {
             NbtCompound schematicNbt = loadSchematicByHash(source, info.hash);
             if (schematicNbt == null) return 0;
 
-            ProgressCalculator.Result result = ProgressCalculator.calculate(targetWorld, schematicNbt, info.origin, info.rotation);
+            ProgressCalculator.Result result = ProgressCalculator.calculate(targetWorld, schematicNbt, info.origin, info.rotation, info.mirror);
 
             LiteralText fileNameText = new LiteralText("文件: " + info.fileName);
             LiteralText progressText = new LiteralText("\n进度: ");
@@ -122,7 +122,7 @@ public class SchemCheckCommand {
             // 调用材料检查逻辑 (使用当前的 source.getWorld() 作为箱子读取的维度，投影坐标则使用 targetWorld)
             // 假设材料箱子在玩家当前维度，投影也在玩家当前维度，这里传入 source.getWorld()
             Map<Item, Integer> missingMaterials = MaterialChecker.calculateMissingMaterials(
-                    source.getWorld(), schematicNbt, info.origin, info.rotation, matPos1, matPos2, includeBuilt
+                    source.getWorld(), schematicNbt, info.origin, info.rotation, info.mirror, matPos1, matPos2, includeBuilt
             );
 
             source.sendFeedback(new LiteralText("\n§e--- " + info.fileName + " 材料缺口 ---"), false);

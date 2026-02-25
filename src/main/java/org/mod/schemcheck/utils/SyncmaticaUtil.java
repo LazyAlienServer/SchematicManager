@@ -5,8 +5,11 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.util.BlockMirror;
 import net.minecraft.util.BlockRotation;
 import net.minecraft.util.math.BlockPos;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.FileReader;
 import java.nio.file.Files;
@@ -15,33 +18,50 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class SyncmaticaUtil {
-    private SyncmaticaUtil() {
-        /* This utility class should not be instantiated */
-    }
+    private static final Logger LOGGER = LoggerFactory.getLogger("SchemCheck-SyncmaticaUtil");
 
-    // 指向 config/syncmatica/placements.json
+    private SyncmaticaUtil() { }
+
     private static final Path PLACEMENTS_FILE = FabricLoader.getInstance().getConfigDir().resolve("syncmatica/placements.json");
     private static final Gson GSON = new Gson();
 
-    // 数据包装类
     public static class PlacementInfo {
         public String fileName;
-        public String hash; // 对应的 UUID 文件名
-        public String dimension; // 维度 (如 minecraft:the_nether)
-        public BlockPos origin; // 起始坐标
-        public BlockRotation rotation; // 旋转角度
+        public String hash;
+        public String dimension;
+        public BlockPos origin;
+        public BlockRotation rotation;
+        public BlockMirror mirror;
 
         public PlacementInfo(){}
-        public PlacementInfo(BlockPos origin, String fileName, String hash, String dimension, BlockRotation rotation) {
-            this.origin = origin;
-            this.fileName = fileName;
-            this.hash = hash;
-            this.dimension = dimension;
-            this.rotation = rotation;
-        }
     }
 
-    // 获取所有已放置的投影名字 (用于指令补全)
+    private static PlacementInfo parsePlacementFromJson(JsonObject placement) {
+        PlacementInfo info = new PlacementInfo();
+        info.fileName = placement.has("file_name") ? placement.get("file_name").getAsString() : "unknown";
+        info.hash = placement.has("hash") ? placement.get("hash").getAsString() : "";
+        info.dimension = placement.getAsJsonObject("origin").get("dimension").getAsString();
+
+        JsonArray posArray = placement.getAsJsonObject("origin").getAsJsonArray("position");
+        info.origin = new BlockPos(posArray.get(0).getAsInt(), posArray.get(1).getAsInt(), posArray.get(2).getAsInt());
+
+        String rot = placement.has("rotation") ? placement.get("rotation").getAsString() : "NONE";
+        info.rotation = switch (rot) {
+            case "CLOCKWISE_90" -> BlockRotation.CLOCKWISE_90;
+            case "CLOCKWISE_180" -> BlockRotation.CLOCKWISE_180;
+            case "COUNTERCLOCKWISE_90" -> BlockRotation.COUNTERCLOCKWISE_90;
+            default -> BlockRotation.NONE;
+        };
+
+        String mir = placement.has("mirror") ? placement.get("mirror").getAsString() : "NONE";
+        info.mirror = switch (mir) {
+            case "LEFT_RIGHT" -> BlockMirror.LEFT_RIGHT;
+            case "FRONT_BACK" -> BlockMirror.FRONT_BACK;
+            default -> BlockMirror.NONE;
+        };
+        return info;
+    }
+
     public static List<String> getAllPlacementNames() {
         List<String> names = new ArrayList<>();
         if (!Files.exists(PLACEMENTS_FILE)) return names;
@@ -53,48 +73,41 @@ public class SyncmaticaUtil {
                 names.add(elem.getAsJsonObject().get("file_name").getAsString());
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            LOGGER.error("获取所有投影名称失败", e);
         }
         return names;
     }
 
-    // 根据名字获取详细放置信息
     public static PlacementInfo getPlacement(String targetFileName) {
         if (!Files.exists(PLACEMENTS_FILE)) return null;
-
         try (FileReader reader = new FileReader(PLACEMENTS_FILE.toFile())) {
             JsonObject root = GSON.fromJson(reader, JsonObject.class);
-            JsonArray placements = root.getAsJsonArray("placements");
-
-            for (JsonElement elem : placements) {
+            for (JsonElement elem : root.getAsJsonArray("placements")) {
                 JsonObject placement = elem.getAsJsonObject();
-                String fileName = placement.get("file_name").getAsString();
-
-                // 忽略大小写匹配文件名
-                if (fileName.equalsIgnoreCase(targetFileName)) {
-                    PlacementInfo info = new PlacementInfo();
-                    info.fileName = fileName;
-                    info.hash = placement.get("hash").getAsString();
-
-                    // 解析原点
-                    JsonObject originObj = placement.getAsJsonObject("origin");
-                    info.dimension = originObj.get("dimension").getAsString();
-                    JsonArray posArray = originObj.getAsJsonArray("position");
-                    info.origin = new BlockPos(posArray.get(0).getAsInt(), posArray.get(1).getAsInt(), posArray.get(2).getAsInt());
-
-                    // 解析旋转
-                    String rot = placement.has("rotation") ? placement.get("rotation").getAsString() : "NONE";
-                    info.rotation = switch (rot) {
-                        case "CLOCKWISE_90" -> BlockRotation.CLOCKWISE_90;
-                        case "CLOCKWISE_180" -> BlockRotation.CLOCKWISE_180;
-                        case "COUNTERCLOCKWISE_90" -> BlockRotation.COUNTERCLOCKWISE_90;
-                        default -> BlockRotation.NONE;
-                    };
-                    return info;
+                if (placement.get("file_name").getAsString().equalsIgnoreCase(targetFileName)) {
+                    return parsePlacementFromJson(placement);
                 }
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            LOGGER.error("按文件名获取投影失败: {}", targetFileName, e);
+        }
+        return null;
+    }
+
+    public static PlacementInfo getPlacementByUUID(String targetUuid) {
+        if (!Files.exists(PLACEMENTS_FILE)) return null;
+        try (FileReader reader = new FileReader(PLACEMENTS_FILE.toFile())) {
+            JsonObject root = GSON.fromJson(reader, JsonObject.class);
+            for (JsonElement elem : root.getAsJsonArray("placements")) {
+                JsonObject placement = elem.getAsJsonObject();
+                String hash = placement.has("hash") ? placement.get("hash").getAsString() : "";
+                String id = placement.has("id") ? placement.get("id").getAsString() : "";
+                if (targetUuid.equalsIgnoreCase(hash) || targetUuid.equalsIgnoreCase(id)) {
+                    return parsePlacementFromJson(placement);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.error("按 UUID 获取投影失败: {}", targetUuid, e);
         }
         return null;
     }

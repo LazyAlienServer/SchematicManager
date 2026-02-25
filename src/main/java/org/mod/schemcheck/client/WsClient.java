@@ -18,8 +18,10 @@ import org.mod.schemcheck.data.ResultMsg;
 import org.mod.schemcheck.data.WsProtocol;
 import org.mod.schemcheck.logic.MaterialChecker;
 import org.mod.schemcheck.logic.ProgressCalculator;
-import org.mod.schemcheck.utils.SchematicLoader;
+import org.mod.schemcheck.utils.SchematicCache;
 import org.mod.schemcheck.utils.SyncmaticaUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.net.URI;
@@ -27,6 +29,7 @@ import java.nio.file.Path;
 import java.util.*;
 
 public class WsClient extends WebSocketClient {
+    private static final Logger LOGGER = LoggerFactory.getLogger("SchemCheck-WsClient");
     private final ObjectMapper mapper = new ObjectMapper();
 
     public WsClient(URI serverUri) {
@@ -35,7 +38,23 @@ public class WsClient extends WebSocketClient {
 
     @Override
     public void onOpen(ServerHandshake handshakedata) {
-        System.out.println("WebSocket 已连接");
+        LOGGER.info("WebSocket 已成功连接到服务器: {}", this.getURI());
+    }
+
+    private void sendError(String id, String action, String errorMsg) {
+        try {
+            Map<String, String> errMap = new HashMap<>();
+            errMap.put("error", errorMsg);
+
+            String responseAction = action;
+            if ("GET_PROGRESS_TASK".equals(action)) responseAction = "RESULT";
+            if ("GET_MATERIAL_TASK".equals(action)) responseAction = "MATERIAL_RESULT";
+
+            this.send(mapper.writeValueAsString(new WsProtocol(id, responseAction, mapper.writeValueAsString(errMap))));
+            LOGGER.warn("已向后端拦截并报告错误: {}", errorMsg);
+        } catch (JsonProcessingException e) {
+            LOGGER.error("发送错误信息时 JSON 序列化失败", e);
+        }
     }
 
     @Override
@@ -43,56 +62,76 @@ public class WsClient extends WebSocketClient {
         try {
             WsProtocol req = mapper.readValue(message, WsProtocol.class);
 
+            if ("GET_SCHEM_FILES".equals(req.action)) {
+                List<SyncmaticaUtil.PlacementInfo> result = new ArrayList<>();
+                for (String name : SyncmaticaUtil.getAllPlacementNames()){
+                    result.add(SyncmaticaUtil.getPlacement(name));
+                }
+                String resultJson = mapper.writeValueAsString(result);
+                this.send(mapper.writeValueAsString(new WsProtocol(req.id, "SCHEMAITC_FILES_INFO", resultJson)));
+                return;
+            }
+
+            DataMsg data = mapper.readValue(req.data, DataMsg.class);
+
+            SyncmaticaUtil.PlacementInfo tempInfo = SyncmaticaUtil.getPlacementByUUID(data.filename);
+            if (tempInfo == null) tempInfo = SyncmaticaUtil.getPlacement(data.filename);
+
+            if (tempInfo == null) {
+                sendError(req.id, req.action, "未找到投影记录 (UUID或文件名不存在)");
+                return;
+            }
+
+            NbtCompound schematicNbt = loadSchematicByHash(tempInfo.hash);
+            if (schematicNbt == null) {
+                sendError(req.id, req.action, "服务端 syncmatics 文件夹缺失原文件: " + tempInfo.hash + ".litematic");
+                return;
+            }
+
             MinecraftServer server = (MinecraftServer) FabricLoader.getInstance().getGameInstance();
+            final SyncmaticaUtil.PlacementInfo finalInfo = tempInfo;
 
-            WsProtocol finalReq = req;
-            server.execute(() -> {
-                try {
-
-
-                    if ("GET_PROGRESS_TASK".equals(finalReq.action)) {
-                        //-----------------------
-                        DataMsg data = mapper.readValue(req.data, DataMsg.class);
-                        SyncmaticaUtil.PlacementInfo info = SyncmaticaUtil.getPlacement(data.filename);
-                        if (info == null) return;
-
-                        RegistryKey<net.minecraft.world.World> dimKey = RegistryKey.of(Registry.WORLD_KEY, new Identifier(info.dimension));
+            if ("GET_PROGRESS_TASK".equals(req.action)) {
+                server.execute(() -> {
+                    try {
+                        RegistryKey<net.minecraft.world.World> dimKey = RegistryKey.of(Registry.WORLD_KEY, new Identifier(finalInfo.dimension));
                         ServerWorld targetWorld = server.getWorld(dimKey);
-                        if (targetWorld == null) return;
-
-                        NbtCompound schematicNbt = loadSchematicByHash(info.hash);
-                        if (schematicNbt == null) return;
-                        //-----------------------
+                        if (targetWorld == null) {
+                            sendError(req.id, req.action, "服务端未加载投影所在的维度: " + finalInfo.dimension);
+                            return;
+                        }
 
                         ProgressCalculator.Result result = ProgressCalculator.calculate(
-                                targetWorld, schematicNbt, info.origin, info.rotation
+                                targetWorld, schematicNbt, finalInfo.origin, finalInfo.rotation, finalInfo.mirror
                         );
 
                         ResultMsg res = new ResultMsg();
                         res.correct = result.correct();
                         res.total = result.total();
 
-                        String resultJson = mapper.writeValueAsString(res);
-                        this.send(mapper.writeValueAsString(new WsProtocol(finalReq.id, "RESULT", resultJson)));
+                        this.send(mapper.writeValueAsString(new WsProtocol(req.id, "RESULT", mapper.writeValueAsString(res))));
+                    } catch (Exception e) {
+                        LOGGER.error("Mod主线程处理进度查询异常", e);
+                        sendError(req.id, req.action, "Mod主线程处理进度异常: " + e.getMessage());
                     }
-                    else if ("GET_MATERIAL_TASK".equals(finalReq.action)) {
-                        //-----------------------
-                        DataMsg data = mapper.readValue(req.data, DataMsg.class);
-                        SyncmaticaUtil.PlacementInfo info = SyncmaticaUtil.getPlacement(data.filename);
-                        if (info == null) return;
-
-                        RegistryKey<net.minecraft.world.World> dimKey = RegistryKey.of(Registry.WORLD_KEY, new Identifier(info.dimension));
+                });
+            }
+            else if ("GET_MATERIAL_TASK".equals(req.action)) {
+                server.execute(() -> {
+                    try {
+                        RegistryKey<net.minecraft.world.World> dimKey = RegistryKey.of(Registry.WORLD_KEY, new Identifier(finalInfo.dimension));
                         ServerWorld targetWorld = server.getWorld(dimKey);
-                        if (targetWorld == null) return;
+                        if (targetWorld == null) {
+                            sendError(req.id, req.action, "服务端未加载投影所在的维度: " + finalInfo.dimension);
+                            return;
+                        }
 
-                        NbtCompound schematicNbt = loadSchematicByHash(info.hash);
-                        if (schematicNbt == null) return;
-                        //-----------------------
                         BlockPos p1 = new BlockPos(data.mx1, data.my1, data.mz1);
                         BlockPos p2 = new BlockPos(data.mx2, data.my2, data.mz2);
 
                         Map<Item, Integer> missing = MaterialChecker.calculateMissingMaterials(
-                                targetWorld, schematicNbt, info.origin, info.rotation, p1, p2, data.includeBuilt
+                                targetWorld, schematicNbt, finalInfo.origin, finalInfo.rotation, finalInfo.mirror,
+                                p1, p2, data.includeBuilt
                         );
 
                         Map<String, Integer> missingStrMap = new HashMap<>();
@@ -100,44 +139,35 @@ public class WsClient extends WebSocketClient {
                             missingStrMap.put(Registry.ITEM.getId(entry.getKey()).toString(), entry.getValue());
                         }
 
-                        String resultJson = mapper.writeValueAsString(missingStrMap);
-                        this.send(mapper.writeValueAsString(new WsProtocol(finalReq.id, "MATERIAL_RESULT", resultJson)));
-                    }else if ("GET_SCHEM_FILES".equals(finalReq.action)) {
-                        System.out.println("Running");
-                        List<SyncmaticaUtil.PlacementInfo> result = new ArrayList<>();
-                        for (String name : SyncmaticaUtil.getAllPlacementNames()){
-                            result.add(SyncmaticaUtil.getPlacement(name));
-                        }
-
-                        String resultJson = mapper.writeValueAsString(result);
-                        this.send(mapper.writeValueAsString(new WsProtocol(finalReq.id, "SCHEMAITC_FILES_INFO", resultJson)));
+                        this.send(mapper.writeValueAsString(new WsProtocol(req.id, "MATERIAL_RESULT", mapper.writeValueAsString(missingStrMap))));
+                    } catch (Exception e) {
+                        LOGGER.error("Mod主线程处理材料查询异常", e);
+                        sendError(req.id, req.action, "Mod主线程处理材料异常: " + e.getMessage());
                     }
+                });
+            }
 
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            });
-
-        } catch (JsonProcessingException e) {
-            e.printStackTrace();
+        } catch (Exception e) {
+            LOGGER.error("处理 WebSocket 消息时发生严重异常", e);
         }
     }
 
     private NbtCompound loadSchematicByHash(String hash) {
         Path syncmaticsDir = FabricLoader.getInstance().getGameDir().resolve("syncmatics");
         File file = syncmaticsDir.resolve(hash + ".litematic").toFile();
-        return file.exists() ? SchematicLoader.load(file) : null;
+
+        return SchematicCache.getOrLoad(file, hash);
     }
 
     @Override
     public void onClose(int code, String reason, boolean remote) {
-        System.out.println("3秒后尝试重连");
+        LOGGER.warn("WebSocket 连接已关闭 (Code: {}, Reason: {}), 3秒后尝试重连...", code, reason);
         Thread reconnectThread = new Thread(() -> {
             try {
                 Thread.sleep(3000);
                 this.reconnect();
             } catch (InterruptedException e) {
-                e.printStackTrace();
+                LOGGER.error("WebSocket 重连线程被中断", e);
                 Thread.currentThread().interrupt();
             }
         });

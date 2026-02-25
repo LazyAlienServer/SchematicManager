@@ -7,6 +7,7 @@ import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.util.BlockMirror;
 import net.minecraft.util.BlockRotation;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -17,20 +18,19 @@ import java.util.Map;
 public class MaterialChecker {
 
     public static Map<Item, Integer> calculateMissingMaterials(
-            World world, NbtCompound schematicNbt, BlockPos placementOrigin, BlockRotation rotation,
+            World world, NbtCompound schematicNbt, BlockPos placementOrigin, BlockRotation rotation, BlockMirror mirror,
             BlockPos matPos1, BlockPos matPos2, boolean includeBuilt) {
 
         Map<Item, Integer> required = new HashMap<>();
         Map<Item, Integer> available = new HashMap<>();
 
-        // 1. 遍历投影文件，计算所需材料以及已搭建的材料
         NbtCompound regions = schematicNbt.getCompound("Regions");
         for (String regionName : regions.getKeys()) {
             NbtCompound region = regions.getCompound(regionName);
             NbtCompound posNbt = region.getCompound("Position");
             BlockPos regionOffset = new BlockPos(posNbt.getInt("x"), posNbt.getInt("y"), posNbt.getInt("z"));
 
-            var pairs = BlockDataSampler.sampleRegion(world, region, placementOrigin, regionOffset, rotation);
+            var pairs = BlockDataSampler.sampleRegion(world, region, placementOrigin, regionOffset, rotation, mirror);
 
             for (var pair : pairs) {
                 Block requiredBlock = pair.schemState().getBlock();

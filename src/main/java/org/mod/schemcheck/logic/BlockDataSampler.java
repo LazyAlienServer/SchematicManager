@@ -5,6 +5,7 @@ import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtElement;
 import net.minecraft.nbt.NbtHelper;
 import net.minecraft.nbt.NbtList;
+import net.minecraft.util.BlockMirror;
 import net.minecraft.util.BlockRotation;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -14,7 +15,8 @@ import java.util.List;
 public class BlockDataSampler {
     public record BlockPair(BlockState schemState, BlockState worldState) {}
 
-    public static List<BlockPair> sampleRegion(World world, NbtCompound regionNbt, BlockPos placementOrigin, BlockPos regionOffset, BlockRotation rotation) {
+    // ⭐ 在参数列表中加入 BlockMirror mirror
+    public static List<BlockPair> sampleRegion(World world, NbtCompound regionNbt, BlockPos placementOrigin, BlockPos regionOffset, BlockRotation rotation, BlockMirror mirror) {
         List<BlockPair> pairs = new ArrayList<>();
 
         NbtCompound size = regionNbt.getCompound("Size");
@@ -53,20 +55,28 @@ public class BlockDataSampler {
                     int unrotatedY = regionOffset.getY() + offsetY + y;
                     int unrotatedZ = regionOffset.getZ() + offsetZ + z;
 
-                    int rotX = unrotatedX;
-                    int rotZ = unrotatedZ;
+                    int mirroredX = unrotatedX;
+                    int mirroredZ = unrotatedZ;
+                    if (mirror == BlockMirror.LEFT_RIGHT) {
+                        mirroredX = -unrotatedX;
+                    } else if (mirror == BlockMirror.FRONT_BACK) {
+                        mirroredZ = -unrotatedZ;
+                    }
+
+                    int rotX = mirroredX;
+                    int rotZ = mirroredZ;
                     switch (rotation) {
-                        case CLOCKWISE_90 -> { rotX = -unrotatedZ; rotZ = unrotatedX; }
-                        case CLOCKWISE_180 -> { rotX = -unrotatedX; rotZ = -unrotatedZ; }
-                        case COUNTERCLOCKWISE_90 -> { rotX = unrotatedZ; rotZ = -unrotatedX; }
+                        case CLOCKWISE_90 -> { rotX = -mirroredZ; rotZ = mirroredX; }
+                        case CLOCKWISE_180 -> { rotX = -mirroredX; rotZ = -mirroredZ; }
+                        case COUNTERCLOCKWISE_90 -> { rotX = mirroredZ; rotZ = -mirroredX; }
                         default -> {}
                     }
 
                     BlockPos worldPos = placementOrigin.add(rotX, unrotatedY, rotZ);
 
-                    BlockState rotatedSchemState = schemState.rotate(rotation);
+                    BlockState transformedSchemState = schemState.mirror(mirror).rotate(rotation);
 
-                    pairs.add(new BlockPair(rotatedSchemState, world.getBlockState(worldPos)));
+                    pairs.add(new BlockPair(transformedSchemState, world.getBlockState(worldPos)));
                 }
             }
         }
