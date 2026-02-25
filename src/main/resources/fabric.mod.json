@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "schemcheck",
+  "version": "${version}",
+  "name": "schemcheck",
+  "description": "Compare schematics",
+  "authors": [],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/schemcheck/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-datagen": [
+      "org.mod.schemcheck.client.SchemcheckDataGenerator"
+    ],
+    "client": [
+      "org.mod.schemcheck.client.SchemcheckClient"
+    ],
+    "main": [
+      "org.mod.schemcheck.Schemcheck"
+    ]
+  },
+  "mixins": [
+    "schemcheck.mixins.json",
+    {
+      "config": "schemcheck.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
