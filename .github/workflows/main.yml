@@ -34,11 +34,8 @@ jobs:
 
       # --- 步骤 2：仅在有 Tag 时执行的 Release 逻辑 ---
       - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/') # 只有是 tag 触发时才运行此步骤
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            build/libs/*.jar  # 自动上传 Gradle 打包出的 jar 文件
-            # 如果你有多个产物，可以在此处列出
-          generate_release_notes: true # 自动生成变更日志
-          # source code (zip/tar.gz) 会由 GitHub 默认自动包含在 Release 中
+          files: "**/build/libs/*.jar"  # 使用双星号递归搜索所有模块下的 jar
+          generate_release_notes: true
