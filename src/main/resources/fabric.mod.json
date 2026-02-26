@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "schemcheck",
+  "version": "${version}",
+  "name": "SchemCheck",
+  "description": "",
+  "authors": [],
+  "contact": {},
+  "license": "GPL-3.0",
+  "icon": "assets/schemcheck/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-datagen": [
+      "com.lazyalienserver.schemcheck.client.SchemcheckDataGenerator"
+    ],
+    "client": [
+      "com.lazyalienserver.schemcheck.client.SchemcheckClient"
+    ],
+    "main": [
+      "com.lazyalienserver.schemcheck.Schemcheck"
+    ]
+  },
+  "mixins": [
+    "schemcheck.mixins.json",
+    {
+      "config": "schemcheck.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
