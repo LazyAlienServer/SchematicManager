@@ -1,0 +1,42 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+
+          name: Build with Gradle
+          run: ./gradlew build -x test
+
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+
+          name: Release ${{ github.ref_name }}
+
+          files: |
+            target/*.jar
+            # build/libs/*.jar  # 如果是 Gradle 请用这一行
+          generate_release_notes: true 
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
