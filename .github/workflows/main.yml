@@ -1,42 +1,44 @@
-name: Build and Release
+name: Java CI with Gradle
 
 on:
   push:
+    branches: [ "main", "master" ] # 每次提交到主分支时触发打包
     tags:
-      - 'v*'
-
-permissions:
-  contents: write
+      - 'v*' # 当推送以 v 开头的 tag 时触发 Release（如 v1.0.0）
 
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # 赋予创建 Release 的权限
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 获取完整历史以支持版本计算（如果需要）
 
-      - name: Set up JDK 17
+      - name: Set up JDK 17 # 根据你的项目修改 Java 版本
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: 'gradle'
+          cache: gradle
 
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
-          name: Build with Gradle
-          run: ./gradlew build -x test
+      # --- 步骤 1：每次提交都会执行的打包逻辑 ---
+      - name: Build with Gradle
+        run: ./gradlew assemble
 
-
+      # --- 步骤 2：仅在有 Tag 时执行的 Release 逻辑 ---
       - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/') # 只有是 tag 触发时才运行此步骤
         uses: softprops/action-gh-release@v2
         with:
-
-          name: Release ${{ github.ref_name }}
-
           files: |
-            target/*.jar
-            # build/libs/*.jar  # 如果是 Gradle 请用这一行
-          generate_release_notes: true 
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            build/libs/*.jar  # 自动上传 Gradle 打包出的 jar 文件
+            # 如果你有多个产物，可以在此处列出
+          generate_release_notes: true # 自动生成变更日志
+          # source code (zip/tar.gz) 会由 GitHub 默认自动包含在 Release 中
